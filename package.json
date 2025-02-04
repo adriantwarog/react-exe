@@ -1,11 +1,11 @@
 {
-  "name": "react-code-viewer",
+  "name": "react-exe",
   "version": "1.0.0",
   "description": "A flexible React component renderer with support for external dependencies",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc ",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
