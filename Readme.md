@@ -203,8 +203,8 @@ function App() {
 
 ## License
 
-MIT © [Vikrant]
+MIT © [Vikrant](https://www.linkedin.com/in/vikrant-guleria/)
 
 ---
 
-Made with ❤️ by [Vikrant](https://github.com/yourusername)
+Made with ❤️ by [Vikrant](https://www.linkedin.com/in/vikrant-guleria/)
