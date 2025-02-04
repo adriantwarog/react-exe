@@ -1,3 +1,55 @@
+import { NodePath } from "@babel/core";
+
+const createImportTransformerPlugin = (allowedDependencies: string[]) => {
+  return () => ({
+    name: "import-transformer",
+    visitor: {
+      ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
+        const source = path.node.source.value;
+        const specifiers = path.node.specifiers;
+
+        if (specifiers.length === 0) return;
+
+        if (!allowedDependencies.includes(source) && source !== "react") {
+          throw new Error(`Unauthorized import: ${source}`);
+        }
+
+        const properties = specifiers
+          .map((specifier) => {
+            if (t.isImportSpecifier(specifier)) {
+              const imported = specifier.imported;
+              const importedName = t.isIdentifier(imported)
+                ? imported.name
+                : t.isStringLiteral(imported)
+                ? imported.value
+                : null;
+
+              if (importedName === null) return null;
+
+              return t.objectProperty(
+                t.identifier(importedName),
+                t.identifier(specifier.local.name),
+                false,
+                importedName === specifier.local.name
+              );
+            }
+            return null;
+          })
+          .filter((prop): prop is t.ObjectProperty => prop !== null);
+
+        const newDeclaration = t.variableDeclaration("const", [
+          t.variableDeclarator(
+            t.objectPattern(properties),
+            source === "react" ? t.identifier("React") : t.identifier(source)
+          ),
+        ]);
+
+        path.replaceWith(newDeclaration);
+      },
+    },
+  });
+};
+
 export const removeDefaultExport = (
   input: string
 ): { modifiedInput: string; exportedName: string | null } => {
