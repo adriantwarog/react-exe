@@ -1,8 +1,8 @@
 import { NodePath } from "@babel/core";
 import * as t from "@babel/types";
-import * as Babel from "@babel/standalone";
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { transform } from "../utils/babel-transformer";
 
 export const transformCode = (
   code: string,
@@ -10,21 +10,42 @@ export const transformCode = (
 ) => {
   const { modifiedInput, exportedName } = removeDefaultExport(code);
 
-  const transpiledCode = Babel.transform(modifiedInput, {
+  // Create a map of safe variable names
+  const dependencyVarMap = new Map<string, string>();
+  Object.keys(dependencies).map((dep) => {
+    const safeName = dep.replace(/[^a-zA-Z0-9_]/g, "_");
+    dependencyVarMap.set(dep, safeName);
+    return safeName;
+  });
+
+  const transpiledCode = transform(modifiedInput, {
     presets: [["typescript", { isTSX: true, allExtensions: true }], ["react"]],
-    plugins: [createImportTransformerPlugin(Object.keys(dependencies))],
+    plugins: [
+      createImportTransformerPlugin(
+        Object.keys(dependencies),
+        dependencyVarMap
+      ),
+    ],
   }).code;
+
+  // Create individual variable declarations for each dependency
+  const dependencyVars = Array.from(dependencyVarMap.entries())
+    .map(([original, safe]) => `const ${safe} = dependencies['${original}'];`)
+    .join("\n      ");
 
   return `
     return function(React, dependencies) {
-      const { ${Object.keys(dependencies).join(", ")} } = dependencies;
+      ${dependencyVars}
       ${transpiledCode}
       return ${exportedName};
     }
   `;
 };
 
-const createImportTransformerPlugin = (allowedDependencies: string[]) => {
+const createImportTransformerPlugin = (
+  allowedDependencies: string[],
+  dependencyVarMap: Map<string, string>
+) => {
   return () => ({
     name: "import-transformer",
     visitor: {
@@ -61,10 +82,14 @@ const createImportTransformerPlugin = (allowedDependencies: string[]) => {
           })
           .filter((prop): prop is t.ObjectProperty => prop !== null);
 
+        // Use the safe variable name from the map
+        const sourceVarName =
+          source === "react" ? "React" : dependencyVarMap.get(source) || source;
+
         const newDeclaration = t.variableDeclaration("const", [
           t.variableDeclarator(
             t.objectPattern(properties),
-            source === "react" ? t.identifier("React") : t.identifier(source)
+            t.identifier(sourceVarName)
           ),
         ]);
 
