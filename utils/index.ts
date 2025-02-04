@@ -1,4 +1,26 @@
 import { NodePath } from "@babel/core";
+import * as t from "@babel/types";
+import * as Babel from "@babel/standalone";
+
+export const transformCode = (
+  code: string,
+  dependencies: Record<string, any>
+) => {
+  const { modifiedInput, exportedName } = removeDefaultExport(code);
+
+  const transpiledCode = Babel.transform(modifiedInput, {
+    presets: [["typescript", { isTSX: true, allExtensions: true }], ["react"]],
+    plugins: [createImportTransformerPlugin(Object.keys(dependencies))],
+  }).code;
+
+  return `
+    return function(React, dependencies) {
+      const { ${Object.keys(dependencies).join(", ")} } = dependencies;
+      ${transpiledCode}
+      return ${exportedName};
+    }
+  `;
+};
 
 const createImportTransformerPlugin = (allowedDependencies: string[]) => {
   return () => ({
