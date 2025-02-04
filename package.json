@@ -1,28 +1,52 @@
 {
   "name": "react-exe",
-  "version": "1.0.0",
-  "description": "A flexible React component renderer with support for external dependencies",
+  "version": "1.0.1",
+  "description": "A powerful React component executor that renders code with external dependencies and custom styling",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "author": "Vikrant",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vgulerianb/react-exe"
+  },
+  "module": "dist/index.esm.js",
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "react",
+    "code-executor",
+    "live-preview",
+    "component-renderer",
+    "code-playground",
+    "react-playground",
+    "typescript",
+    "tailwind"
+  ],
   "scripts": {
-    "build": "tsc ",
-    "prepublishOnly": "npm run build"
+    "clean": "rimraf dist",
+    "build": "npm run clean && rollup -c",
+    "prepare": "npm run build"
   },
   "peerDependencies": {
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
   "dependencies": {
-    "@babel/core": "^7.23.7",
-    "@babel/standalone": "^7.23.7",
-    "@babel/types": "^7.23.7",
+    "@babel/standalone": "^7.26.7",
     "clsx": "^2.1.0",
-    "tailwind-merge": "^2.2.0"
+    "tailwind-merge": "^2.1.0"
   },
   "devDependencies": {
-    "@types/react": "^18.2.48",
-    "@types/babel__core": "^7.20.5",
+    "@rollup/plugin-commonjs": "^25.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-typescript": "^11.0.0",
     "@types/babel__standalone": "^7.1.7",
+    "@types/react": "^18.2.48",
+    "rimraf": "^5.0.0",
+    "rollup": "^4.9.0",
+    "rollup-plugin-peer-deps-external": "^2.2.4",
     "typescript": "^5.3.3"
   }
 }
