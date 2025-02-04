@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { transformCode } from "./utils";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 const defaultSecurityPatterns = [
   /document\.cookie/i,
@@ -91,7 +92,9 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
       className={cn("code-viewer", containerClassName)}
       style={containerStyle}
     >
-      {Component && <Component />}
+      <ErrorBoundary onError={onError}>
+        {Component && <Component />}
+      </ErrorBoundary>
     </div>
   );
 };
