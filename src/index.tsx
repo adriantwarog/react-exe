@@ -27,10 +27,7 @@ export interface CodeExecutorProps {
   config?: CodeExecutorConfig;
 }
 
-export const CodeExecutor: React.FC<CodeExecutorProps> = ({
-  code,
-  config = {},
-}) => {
+export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
   const {
     dependencies = {},
     containerClassName,
