@@ -11,7 +11,7 @@ const defaultSecurityPatterns = [
   /document\.location/i,
 ];
 
-export interface CodeViewerConfig {
+export interface CodeExecutorConfig {
   dependencies?: Record<string, any>;
   containerClassName?: string;
   containerStyle?: React.CSSProperties;
@@ -19,15 +19,15 @@ export interface CodeViewerConfig {
   errorStyle?: React.CSSProperties;
   securityPatterns?: RegExp[];
   onError?: (error: Error) => void;
-  tailwind?: boolean;
+  enableTailwind?: boolean;
 }
 
-export interface CodeViewerProps {
+export interface CodeExecutorProps {
   code: string;
-  config?: CodeViewerConfig;
+  config?: CodeExecutorConfig;
 }
 
-export const CodeViewer: React.FC<CodeViewerProps> = ({
+export const CodeExecutor: React.FC<CodeExecutorProps> = ({
   code,
   config = {},
 }) => {
@@ -93,7 +93,7 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
       className={cn("code-viewer", containerClassName)}
       style={containerStyle}
     >
-      {config?.tailwind ? (
+      {config?.enableTailwind ? (
         <script src="https://cdn.tailwindcss.com" async />
       ) : (
         <></>
@@ -105,4 +105,4 @@ export const CodeViewer: React.FC<CodeViewerProps> = ({
   );
 };
 
-export default CodeViewer;
+export default CodeExecutor;
