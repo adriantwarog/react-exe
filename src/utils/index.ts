@@ -55,9 +55,28 @@ const createImportTransformerPlugin = (
 
         if (specifiers.length === 0) return;
 
-        if (!allowedDependencies.includes(source) && source !== "react") {
-          throw new Error(`Unauthorized import: ${source}`);
+        // Check if the import source exactly matches any allowed dependency
+        const isExactMatch = allowedDependencies.some((dep) => {
+          // Handle both exact matches and subpath matches
+          if (dep.endsWith("/*")) {
+            const basePathPattern = dep.slice(0, -2);
+            return source.startsWith(basePathPattern);
+          }
+          return dep === source;
+        });
+
+        if (!isExactMatch && source !== "react") {
+          throw new Error(`Module not found: ${source}`);
         }
+
+        // Get the base package name for mapping
+        const basePackage = allowedDependencies.find((dep) => {
+          if (dep.endsWith("/*")) {
+            console.log({ dep, source });
+            return source.startsWith(dep.slice(0, -2));
+          }
+          return source === dep;
+        });
 
         const properties = specifiers
           .map((specifier) => {
@@ -82,9 +101,12 @@ const createImportTransformerPlugin = (
           })
           .filter((prop): prop is t.ObjectProperty => prop !== null);
 
-        // Use the safe variable name from the map
         const sourceVarName =
-          source === "react" ? "React" : dependencyVarMap.get(source) || source;
+          (source === "react"
+            ? "React"
+            : basePackage
+            ? dependencyVarMap.get(basePackage)
+            : dependencyVarMap.get(source) || source) || source;
 
         const newDeclaration = t.variableDeclaration("const", [
           t.variableDeclarator(

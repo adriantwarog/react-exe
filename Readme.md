@@ -97,6 +97,61 @@ function App() {
 }
 ```
 
+2. With absolute imports and wildcard patterns
+
+```tsx
+import { CodeExecutor } from "react-exe";
+import * as echarts from "echarts";
+import * as framerMotion from "framer-motion";
+import * as uiComponents from "../ShadcnComps";
+
+const code = `
+import { motion } from 'framer-motion';
+import { LineChart } from 'echarts';
+import { Button } from "@/components/ui/button"
+
+export default function Dashboard() {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="p-6 space-y-4"
+    >
+      <LineChart 
+        option={{
+          xAxis: { type: 'category', data: ['Mon', 'Tue', 'Wed'] },
+          yAxis: { type: 'value' },
+          series: [{ data: [150, 230, 224], type: 'line' }]
+        }}
+        style={{ height: '300px' }}
+      />
+    </motion.div>
+  );
+}
+`;
+
+function App() {
+  return (
+    <CodeExecutor
+      code={code}
+      config={{
+        dependencies: {
+          "framer-motion": framerMotion,
+          echarts: echarts,
+          "@/components/ui/*": uiComponents,
+        },
+        enableTailwind: true,
+        containerClassName: "min-h-[400px]",
+        containerStyle: {
+          padding: "20px",
+          background: "#f9fafb",
+        },
+      }}
+    />
+  );
+}
+```
+
 ### With Custom Error Handling
 
 ```tsx
