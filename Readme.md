@@ -2,6 +2,10 @@
 
 Execute React components on the fly with external dependencies, custom styling, and TypeScript support. Perfect for creating live code previews, documentation, or interactive code playgrounds.
 
+<img width="1281" alt="Screenshot 2025-02-05 at 23 24 15" src="https://github.com/user-attachments/assets/615071f3-7928-474a-8067-35b623e49c15" />
+
+Try the live demo [here](https://react-exe-demo.vercel.app/).
+
 ## Features
 
 - 🚀 Execute React components from string code
