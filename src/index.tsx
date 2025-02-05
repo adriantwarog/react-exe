@@ -41,13 +41,14 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
   const [Component, setComponent] = useState<React.ComponentType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bypassSecurity, setBypassSecurity] = useState(false);
+  const [forbiddenPatterns, setForbiddenPatterns] = useState<boolean>(false);
 
   useEffect(() => {
     try {
       if (!bypassSecurity) {
         for (const pattern of securityPatterns) {
           if (pattern.test(code)) {
-            setBypassSecurity(true);
+            setForbiddenPatterns(true);
             throw new Error(`Forbidden code pattern detected: ${pattern}`);
           }
         }
@@ -84,7 +85,7 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
       >
         <p style={{ margin: 0, fontWeight: 500 }}>Error:</p>
         <p style={{ margin: "8px 0 0 0", fontSize: "14px" }}>{error}</p>
-        {bypassSecurity ? (
+        {forbiddenPatterns ? (
           <div style={{ marginTop: "12px" }}>
             <button
               onClick={() => setBypassSecurity(true)}
