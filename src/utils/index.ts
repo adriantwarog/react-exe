@@ -72,7 +72,6 @@ const createImportTransformerPlugin = (
         // Get the base package name for mapping
         const basePackage = allowedDependencies.find((dep) => {
           if (dep.endsWith("/*")) {
-            console.log({ dep, source });
             return source.startsWith(dep.slice(0, -2));
           }
           return source === dep;
