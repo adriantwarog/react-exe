@@ -40,13 +40,16 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
 
   const [Component, setComponent] = useState<React.ComponentType | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bypassSecurity, setBypassSecurity] = useState(false);
 
   useEffect(() => {
     try {
-      // Security check
-      for (const pattern of securityPatterns) {
-        if (pattern.test(code)) {
-          throw new Error(`Forbidden code pattern detected: ${pattern}`);
+      if (!bypassSecurity) {
+        for (const pattern of securityPatterns) {
+          if (pattern.test(code)) {
+            setBypassSecurity(true);
+            throw new Error(`Forbidden code pattern detected: ${pattern}`);
+          }
         }
       }
 
@@ -64,7 +67,7 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
         onError(err);
       }
     }
-  }, [code, dependencies]);
+  }, [code, dependencies, bypassSecurity]);
 
   if (error) {
     return (
@@ -81,6 +84,27 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
       >
         <p style={{ margin: 0, fontWeight: 500 }}>Error:</p>
         <p style={{ margin: "8px 0 0 0", fontSize: "14px" }}>{error}</p>
+        {bypassSecurity ? (
+          <div style={{ marginTop: "12px" }}>
+            <button
+              onClick={() => setBypassSecurity(true)}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#dc2626",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+              title="Warning: Proceeding may expose you to security risks"
+            >
+              Continue Anyway (Not Recommended)
+            </button>
+          </div>
+        ) : (
+          <></>
+        )}
       </div>
     );
   }
