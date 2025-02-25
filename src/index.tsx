@@ -132,7 +132,7 @@ function executeCode(
     const transformedCode = transformMultipleFiles(codeFiles, dependencies);
 
     // For debugging
-    console.log("Transformed code:", transformedCode);
+    // console.log("Transformed code:", transformedCode);
 
     // Create the factory function and execute it
     const factoryFunction = new Function(transformedCode)();
@@ -186,6 +186,19 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
 
     return codeChanged || dependenciesChanged;
   }, [code, dependencies]);
+
+  useEffect(() => {
+    if (enableTailwind) {
+      const link = document.createElement("link");
+      link.href = "https://cdn.tailwindcss.com";
+      link.rel = "stylesheet";
+      document.head.appendChild(link);
+
+      return () => {
+        document.head.removeChild(link);
+      };
+    }
+  }, [enableTailwind]);
 
   // Execute code on changes
   useEffect(() => {
@@ -286,7 +299,21 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
       className={cn("code-viewer", containerClassName)}
       style={containerStyle}
     >
-      {enableTailwind && <script src="https://cdn.tailwindcss.com" async />}
+      <span
+        style={{
+          display: "none",
+          position: "absolute",
+        }}
+      >
+        Powered by{" "}
+        <a
+          href="https://www.npmjs.com/package/react-exe"
+          target="_blank"
+          rel="noreferrer"
+        >
+          React-EXE
+        </a>
+      </span>
       <ErrorBoundary
         onError={handleExecutionError}
         fallback={

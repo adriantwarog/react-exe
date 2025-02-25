@@ -114,6 +114,7 @@ export const transformMultipleFiles = (
       ],
     }).code;
 
+    // Store both the transpiled code and export information
     moduleCache.set(file.name, {
       code: transpiledCode,
       exportedName,
@@ -153,51 +154,79 @@ export const transformMultipleFiles = (
         exportedName: module.exportedName,
       };
 
-      // Prepare exports handling code
-      let exportsSetup = "";
+      // Extract all named exports directly from the code
+      const namedExports = new Set<string>();
 
-      if (info.hasDefaultExport && info.exportedName) {
-        exportsSetup += `
-          // Handle default export
-          exports.default = ${info.exportedName};
-          // For CommonJS compatibility
-          module.exports = Object.assign({}, module.exports, typeof ${info.exportedName} === 'function' 
-            ? { default: ${info.exportedName} } 
-            : ${info.exportedName});
-        `;
-      }
+      // Check for export statements like "export const useCounter"
+      const exportConstRegex =
+        /export\s+(const|let|var|function|class)\s+([A-Za-z0-9_$]+)/g;
 
-      // For named exports
-      if (info.namedExports && info.namedExports.size > 0) {
-        for (const exportName of info.namedExports) {
-          exportsSetup += `
-            // Handle named export: ${exportName}
-            if (typeof ${exportName} !== 'undefined') {
-              exports.${exportName} = ${exportName};
-            }
-          `;
+      let hookName = null;
+
+      // Look for direct named exports in the original code
+      const originalCode = files.find((f) => f.name === name)?.content || "";
+      let exportMatch;
+      while ((exportMatch = exportConstRegex.exec(originalCode)) !== null) {
+        namedExports.add(exportMatch[2]);
+        if (name.includes("use")) {
+          hookName = exportMatch[2];
+          // console.log("Found named export:", exportMatch[2]);
         }
       }
 
-      return `
-        moduleDefinitions.set("${normalizedName}", function(React) {
-          const module = { exports: {} };
-          const exports = module.exports;
-          
-          try {
-            (function(module, exports) {
-              ${module.code}
-              
-              ${exportsSetup}
-            })(module, exports);
-          } catch (error) {
-            console.error("Error in module ${normalizedName}:", error);
-            throw error;
-          }
-          
-          return module.exports;
-        });
+      // Prepare exports handling code
+      let exportsSetup = "";
+
+      // For default exports
+      if (info.hasDefaultExport && info.exportedName) {
+        exportsSetup += `
+        // Handle default export
+        exports.default = ${info.exportedName};
+        // For CommonJS compatibility
+        module.exports = Object.assign({}, module.exports, typeof ${info.exportedName} === 'function' 
+          ? { default: ${info.exportedName} } 
+          : ${info.exportedName});
       `;
+      }
+
+      // Explicitly handle named exports we found
+      for (const exportName of Array.from(namedExports)) {
+        exportsSetup += `
+        // Handle named export: ${exportName}
+        if (typeof ${exportName} !== 'undefined') {
+          exports.${exportName} = ${exportName};
+        }
+      `;
+      }
+
+      // For hooks add explicit export handling
+      if (hookName && name.includes(hookName)) {
+        exportsSetup += `
+        if (typeof ${hookName} !== 'undefined') {
+          exports.${hookName} = ${hookName};
+        }
+      `;
+      }
+
+      return `
+      moduleDefinitions.set("${normalizedName}", function(React) {
+        const module = { exports: {} };
+        const exports = module.exports;
+        
+        try {
+          (function(module, exports) {
+            ${module.code}
+            
+            ${exportsSetup}
+          })(module, exports);
+        } catch (error) {
+          console.error("Error in module ${normalizedName}:", error);
+          throw error;
+        }
+        
+        return module.exports;
+      });
+    `;
     })
     .join("\n\n");
 
