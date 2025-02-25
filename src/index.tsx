@@ -113,6 +113,7 @@ function executeCode(
       ? code
       : [{ name: "index.tsx", content: code, isEntry: true }];
 
+    // Security check
     if (!bypassSecurity) {
       for (const file of codeFiles) {
         for (const pattern of securityPatterns) {
@@ -127,7 +128,13 @@ function executeCode(
       }
     }
 
+    // Transform the code using our new system
     const transformedCode = transformMultipleFiles(codeFiles, dependencies);
+
+    // For debugging
+    // console.log("Transformed code:", transformedCode);
+
+    // Create the factory function and execute it
     const factoryFunction = new Function(transformedCode)();
     const Component = factoryFunction(React, dependencies);
 
@@ -137,6 +144,7 @@ function executeCode(
       forbiddenPatterns: false,
     };
   } catch (err) {
+    console.error("Error executing code:", err);
     return {
       Component: null,
       error: err instanceof Error ? err.message : "An unknown error occurred",
@@ -157,6 +165,7 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
     errorStyle,
     securityPatterns = defaultSecurityPatterns,
     onError,
+    enableTailwind = false,
   } = config;
 
   const [executionResult, setExecutionResult] = useState<ExecutionResult>(
@@ -178,22 +187,74 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
     return codeChanged || dependenciesChanged;
   }, [code, dependencies]);
 
+  useEffect(() => {
+    if (enableTailwind) {
+      const link = document.createElement("link");
+      link.href = "https://cdn.tailwindcss.com";
+      link.rel = "stylesheet";
+      document.head.appendChild(link);
+
+      return () => {
+        document.head.removeChild(link);
+      };
+    }
+  }, [enableTailwind]);
+
   // Execute code on changes
   useEffect(() => {
     if (hasChanges) {
-      const result = executeCode(code, dependencies, securityPatterns, false);
+      try {
+        const result = executeCode(code, dependencies, securityPatterns, false);
+        setExecutionResult(result);
+        prevCodeRef.current = code;
+        prevDependenciesRef.current = dependencies;
+      } catch (err) {
+        // Handle any synchronous errors during execution
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        setExecutionResult({
+          Component: null,
+          error: errorMessage,
+          forbiddenPatterns: false,
+        });
+        if (onError && err instanceof Error) {
+          onError(err);
+        }
+      }
+    }
+  }, [code, dependencies, securityPatterns, hasChanges, onError]);
+
+  const handleBypassSecurity = useCallback(() => {
+    try {
+      const result = executeCode(code, dependencies, securityPatterns, true);
       setExecutionResult(result);
       prevCodeRef.current = code;
       prevDependenciesRef.current = dependencies;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setExecutionResult({
+        Component: null,
+        error: errorMessage,
+        forbiddenPatterns: false,
+      });
+      if (onError && err instanceof Error) {
+        onError(err);
+      }
     }
-  }, [code, dependencies, securityPatterns, hasChanges]);
+  }, [code, dependencies, securityPatterns, onError]);
 
-  const handleBypassSecurity = useCallback(() => {
-    const result = executeCode(code, dependencies, securityPatterns, true);
-    setExecutionResult(result);
-    prevCodeRef.current = code;
-    prevDependenciesRef.current = dependencies;
-  }, [code, dependencies, securityPatterns]);
+  const handleExecutionError = useCallback(
+    (error: Error) => {
+      setExecutionResult((prev) => ({
+        ...prev,
+        error: error.message,
+        Component: null,
+      }));
+      if (onError) {
+        onError(error);
+      }
+    },
+    [onError]
+  );
 
   if (error) {
     return (
@@ -238,11 +299,44 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
       className={cn("code-viewer", containerClassName)}
       style={containerStyle}
     >
-      {config?.enableTailwind && (
-        <script src="https://cdn.tailwindcss.com" async />
-      )}
-      <ErrorBoundary onError={onError}>
-        {Component && <Component />}
+      <span
+        style={{
+          display: "none",
+          position: "absolute",
+        }}
+      >
+        Powered by{" "}
+        <a
+          href="https://www.npmjs.com/package/react-exe"
+          target="_blank"
+          rel="noreferrer"
+        >
+          React-EXE
+        </a>
+      </span>
+      <ErrorBoundary
+        onError={handleExecutionError}
+        fallback={
+          <div
+            className={cn("code-viewer-error", errorClassName)}
+            style={{
+              padding: "16px",
+              backgroundColor: "#fef2f2",
+              border: "1px solid #fee2e2",
+              borderRadius: "4px",
+              color: "#dc2626",
+              ...errorStyle,
+            }}
+          >
+            <p style={{ margin: 0, fontWeight: 500 }}>Rendering Error:</p>
+            <p style={{ margin: "8px 0 0 0", fontSize: "14px" }}>
+              The component failed to render. Check the console for more
+              details.
+            </p>
+          </div>
+        }
+      >
+        {Component ? <Component /> : null}
       </ErrorBoundary>
     </div>
   );

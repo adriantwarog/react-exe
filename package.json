@@ -1,6 +1,6 @@
 {
   "name": "react-exe",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "A powerful React component executor that renders code with external dependencies and custom styling",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
