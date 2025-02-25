@@ -1,5 +1,11 @@
-import React, { useState, useEffect } from "react";
-import { cn, transformCode } from "./utils";
+import React, {
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+} from "react";
+import { cn, transformMultipleFiles } from "./utils";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 const defaultSecurityPatterns = [
@@ -10,6 +16,12 @@ const defaultSecurityPatterns = [
   /document\.write/i,
   /document\.location/i,
 ];
+
+export interface CodeFile {
+  name: string;
+  content: string;
+  isEntry?: boolean;
+}
 
 export interface CodeExecutorConfig {
   dependencies?: Record<string, any>;
@@ -23,11 +35,120 @@ export interface CodeExecutorConfig {
 }
 
 export interface CodeExecutorProps {
-  code: string;
+  code: string | CodeFile[];
   config?: CodeExecutorConfig;
 }
 
-export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
+interface ExecutionResult {
+  Component: React.ComponentType | null;
+  error: string | null;
+  forbiddenPatterns: boolean;
+}
+
+const initialExecutionResult: ExecutionResult = {
+  Component: null,
+  error: null,
+  forbiddenPatterns: false,
+};
+
+// Helper function to compare code content
+const isCodeDifferent = (
+  prevCode: string | CodeFile[] | undefined,
+  newCode: string | CodeFile[]
+): boolean => {
+  if (!prevCode) return true;
+
+  if (typeof prevCode === "string" && typeof newCode === "string") {
+    return prevCode !== newCode;
+  }
+
+  if (Array.isArray(prevCode) && Array.isArray(newCode)) {
+    if (prevCode.length !== newCode.length) return true;
+
+    return prevCode.some((file, index) => {
+      const newFile = newCode[index];
+      return (
+        file.name !== newFile.name ||
+        file.content !== newFile.content ||
+        file.isEntry !== newFile.isEntry
+      );
+    });
+  }
+
+  return true;
+};
+
+// Helper function to compare dependencies
+const isDependenciesDifferent = (
+  prevDeps: Record<string, any> = {},
+  newDeps: Record<string, any> = {}
+): boolean => {
+  const prevKeys = Object.keys(prevDeps);
+  const newKeys = Object.keys(newDeps);
+
+  if (prevKeys.length !== newKeys.length) return true;
+
+  return prevKeys.some((key) => {
+    const prevValue = prevDeps[key];
+    const newValue = newDeps[key];
+
+    // Compare only the reference for functions and objects
+    if (typeof prevValue === "function" || typeof newValue === "function") {
+      return prevValue !== newValue;
+    }
+
+    // For primitive values, compare the value
+    return prevValue !== newValue;
+  });
+};
+
+function executeCode(
+  code: string | CodeFile[],
+  dependencies: Record<string, any>,
+  securityPatterns: RegExp[],
+  bypassSecurity: boolean
+): ExecutionResult {
+  try {
+    const codeFiles = Array.isArray(code)
+      ? code
+      : [{ name: "index.tsx", content: code, isEntry: true }];
+
+    if (!bypassSecurity) {
+      for (const file of codeFiles) {
+        for (const pattern of securityPatterns) {
+          if (pattern.test(file.content)) {
+            return {
+              Component: null,
+              error: `Forbidden code pattern detected in ${file.name}: ${pattern}`,
+              forbiddenPatterns: true,
+            };
+          }
+        }
+      }
+    }
+
+    const transformedCode = transformMultipleFiles(codeFiles, dependencies);
+    const factoryFunction = new Function(transformedCode)();
+    const Component = factoryFunction(React, dependencies);
+
+    return {
+      Component,
+      error: null,
+      forbiddenPatterns: false,
+    };
+  } catch (err) {
+    return {
+      Component: null,
+      error: err instanceof Error ? err.message : "An unknown error occurred",
+      forbiddenPatterns: false,
+    };
+  }
+}
+
+export const CodeExecutor: React.FC<CodeExecutorProps> = ({
+  code,
+  config = {},
+}) => {
   const {
     dependencies = {},
     containerClassName,
@@ -38,37 +159,41 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
     onError,
   } = config;
 
-  const [Component, setComponent] = useState<React.ComponentType | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [bypassSecurity, setBypassSecurity] = useState(false);
-  const [forbiddenPatterns, setForbiddenPatterns] = useState<boolean>(false);
+  const [executionResult, setExecutionResult] = useState<ExecutionResult>(
+    initialExecutionResult
+  );
 
+  const { Component, error, forbiddenPatterns } = executionResult;
+  const prevCodeRef = useRef<string | CodeFile[]>();
+  const prevDependenciesRef = useRef<Record<string, any>>();
+
+  // Check if code or dependencies have changed
+  const hasChanges = useMemo(() => {
+    const codeChanged = isCodeDifferent(prevCodeRef.current, code);
+    const dependenciesChanged = isDependenciesDifferent(
+      prevDependenciesRef.current,
+      dependencies
+    );
+
+    return codeChanged || dependenciesChanged;
+  }, [code, dependencies]);
+
+  // Execute code on changes
   useEffect(() => {
-    try {
-      if (!bypassSecurity) {
-        for (const pattern of securityPatterns) {
-          if (pattern.test(code)) {
-            setForbiddenPatterns(true);
-            throw new Error(`Forbidden code pattern detected: ${pattern}`);
-          }
-        }
-      }
-
-      const transformedCode = transformCode(code, dependencies);
-      const factoryFunction = new Function(transformedCode)();
-      const component = factoryFunction(React, dependencies);
-
-      setComponent(() => component);
-      setError(null);
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "An unknown error occurred";
-      setError(errorMessage);
-      if (onError && err instanceof Error) {
-        onError(err);
-      }
+    if (hasChanges) {
+      const result = executeCode(code, dependencies, securityPatterns, false);
+      setExecutionResult(result);
+      prevCodeRef.current = code;
+      prevDependenciesRef.current = dependencies;
     }
-  }, [code, dependencies, bypassSecurity]);
+  }, [code, dependencies, securityPatterns, hasChanges]);
+
+  const handleBypassSecurity = useCallback(() => {
+    const result = executeCode(code, dependencies, securityPatterns, true);
+    setExecutionResult(result);
+    prevCodeRef.current = code;
+    prevDependenciesRef.current = dependencies;
+  }, [code, dependencies, securityPatterns]);
 
   if (error) {
     return (
@@ -85,10 +210,10 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
       >
         <p style={{ margin: 0, fontWeight: 500 }}>Error:</p>
         <p style={{ margin: "8px 0 0 0", fontSize: "14px" }}>{error}</p>
-        {forbiddenPatterns ? (
+        {forbiddenPatterns && (
           <div style={{ marginTop: "12px" }}>
             <button
-              onClick={() => setBypassSecurity(true)}
+              onClick={handleBypassSecurity}
               style={{
                 padding: "8px 16px",
                 backgroundColor: "#dc2626",
@@ -103,8 +228,6 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
               Continue Anyway (Not Recommended)
             </button>
           </div>
-        ) : (
-          <></>
         )}
       </div>
     );
@@ -115,10 +238,8 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
       className={cn("code-viewer", containerClassName)}
       style={containerStyle}
     >
-      {config?.enableTailwind ? (
+      {config?.enableTailwind && (
         <script src="https://cdn.tailwindcss.com" async />
-      ) : (
-        <></>
       )}
       <ErrorBoundary onError={onError}>
         {Component && <Component />}
@@ -127,4 +248,4 @@ export const CodeExecutor = ({ code, config = {} }: CodeExecutorProps) => {
   );
 };
 
-export default CodeExecutor;
+export default React.memo(CodeExecutor);
