@@ -1066,6 +1066,10 @@ function App() {
 }
 ```
 
+## Used By [TuneChat](https://chat.tune.app/) to render Artifacts
+
+<img width="1512" alt="Screenshot 2025-02-26 at 16 58 34" src="https://github.com/user-attachments/assets/8b3d096f-1db3-47c3-be90-712c50bdd6d3" />
+
 ## License
 
 MIT © [Vikrant](https://www.linkedin.com/in/vikrant-guleria/)
