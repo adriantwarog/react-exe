@@ -31,6 +31,8 @@ export interface CodeExecutorConfig {
   errorStyle?: React.CSSProperties;
   securityPatterns?: RegExp[];
   onError?: (error: Error) => void;
+  enableTailwind?: boolean;
+  componentMap?: Record<string, any>; // Map component paths to actual components
 }
 
 export interface CodeExecutorProps {
@@ -105,7 +107,8 @@ function executeCode(
   code: string | CodeFile[],
   dependencies: Record<string, any>,
   securityPatterns: RegExp[],
-  bypassSecurity: boolean
+  bypassSecurity: boolean,
+  componentMap: Record<string, any> = {}
 ): ExecutionResult {
   try {
     const codeFiles = Array.isArray(code)
@@ -128,7 +131,7 @@ function executeCode(
     }
 
     // Transform the code using our new system
-    const transformedCode = transformMultipleFiles(codeFiles, dependencies);
+    const transformedCode = transformMultipleFiles(codeFiles, dependencies, componentMap);
 
     // For debugging
     // console.log("Transformed code:", transformedCode);
@@ -158,10 +161,14 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
 }) => {
   const {
     dependencies = {},
+    containerClassName,
+    containerStyle,
     errorClassName,
     errorStyle,
     securityPatterns = defaultSecurityPatterns,
     onError,
+    enableTailwind = false,
+    componentMap = {},
   } = config;
 
   const [executionResult, setExecutionResult] = useState<ExecutionResult>(
@@ -189,7 +196,7 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
   useEffect(() => {
     if (hasChanges) {
       try {
-        const result = executeCode(code, dependencies, securityPatterns, false);
+        const result = executeCode(code, dependencies, securityPatterns, false, componentMap);
         setExecutionResult(result);
         prevCodeRef.current = code;
         prevDependenciesRef.current = dependencies;
@@ -206,11 +213,11 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
         }
       }
     }
-  }, [code, dependencies, securityPatterns, hasChanges, onError]);
+  }, [code, dependencies, securityPatterns, hasChanges, onError, componentMap]);
 
   const handleBypassSecurity = useCallback(() => {
     try {
-      const result = executeCode(code, dependencies, securityPatterns, true);
+      const result = executeCode(code, dependencies, securityPatterns, true, componentMap);
       setExecutionResult(result);
       prevCodeRef.current = code;
       prevDependenciesRef.current = dependencies;
@@ -225,7 +232,7 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
         onError(err);
       }
     }
-  }, [code, dependencies, securityPatterns, onError]);
+  }, [code, dependencies, securityPatterns, onError, componentMap]);
 
   const handleExecutionError = useCallback(
     (error: Error) => {

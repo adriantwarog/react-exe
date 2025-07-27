@@ -7,9 +7,68 @@ import type { CodeFile } from "../index";
 
 const moduleCache = new Map<string, string>();
 
+// Built-in module mapping for common libraries
+const defaultModuleMap: Record<string, string> = {
+  "react": "https://esm.sh/react@19.0.0",
+  "react-dom": "https://esm.sh/react-dom@19.0.0",
+  "lucide-react": "https://esm.sh/lucide-react@0.513.0",
+  "clsx": "https://esm.sh/clsx@2.1.1",
+  "class-variance-authority": "https://esm.sh/class-variance-authority@0.7.1",
+  "@mdx-js/react": "https://esm.sh/@mdx-js/react@3.1.0",
+  "framer-motion": "https://esm.sh/framer-motion@11.0.0",
+  "date-fns": "https://esm.sh/date-fns@3.0.0",
+  "lodash": "https://esm.sh/lodash@4.17.21",
+  "axios": "https://esm.sh/axios@1.6.0",
+  "uuid": "https://esm.sh/uuid@9.0.0",
+};
+
+// Transform import statements to use CDN URLs
+function transformImports(code: string, componentMap: Record<string, any> = {}): string {
+  return code.replace(
+    /import\s+[\s\S]*?\s+from\s+['"]([^'"]+)['"];?\s*/g,
+    (match, moduleName) => {
+      // Handle local imports by checking componentMap first
+      if (moduleName.startsWith('@/') || moduleName.startsWith('./') || moduleName.startsWith('../')) {
+        // Check if this path exists in componentMap
+        const componentModule = componentMap[moduleName];
+        if (componentModule) {
+          // Extract the import clause to get component names
+          const importClauseMatch = match.match(/import\s+\{([^}]+)\}\s+from/);
+          if (importClauseMatch) {
+            const importClause = importClauseMatch[1];
+            const componentNames = importClause.split(',').map(name => name.trim());
+            
+            // Create variable declarations for each imported component
+            let declarations = '';
+            componentNames.forEach(componentName => {
+              declarations += `const ${componentName} = dependencies.__componentMap['${moduleName}']['${componentName}'] || dependencies.__componentMap['${moduleName}'].${componentName};\n`;
+            });
+            return declarations;
+          }
+        }
+        return ''; // Remove the line entirely if not in componentMap
+      }
+      
+      // Handle external imports with CDN URLs
+      const cdnUrl = defaultModuleMap[moduleName];
+      if (cdnUrl) {
+        // Extract the import clause (everything between 'import' and 'from')
+        const importClauseMatch = match.match(/import\s+([\s\S]*?)\s+from/);
+        if (importClauseMatch) {
+          const importClause = importClauseMatch[1];
+          return `import ${importClause} from '${cdnUrl}';`;
+        }
+      }
+      
+      return match; // Return unchanged if module not in map
+    }
+  );
+}
+
 export const transformMultipleFiles = (
   files: CodeFile[],
-  dependencies: Record<string, any>
+  dependencies: Record<string, any>,
+  componentMap: Record<string, any> = {}
 ) => {
   moduleCache.clear();
 
@@ -71,6 +130,9 @@ export const transformMultipleFiles = (
 
     // Pre-process to handle various exports
     let processedInput = modifiedInput;
+
+    // Transform imports to CDN URLs first
+    processedInput = transformImports(processedInput, componentMap);
 
     // Replace "export const/function" with plain declarations
     processedInput = processedInput.replace(
@@ -150,6 +212,13 @@ export const transformMultipleFiles = (
     })
     .join("\n      ");
 
+  // Add componentMap to dependencies if it exists
+  const componentMapVar = Object.keys(componentMap).length > 0 
+    ? `dependencies.__componentMap = ${JSON.stringify(componentMap)};`
+    : '';
+
+  const allDependencyVars = componentMapVar ? `${dependencyVars}\n      ${componentMapVar}` : dependencyVars;
+
   // Create the module registry
   const moduleRegistryCode = `
     const moduleCache = new Map();
@@ -168,23 +237,20 @@ export const transformMultipleFiles = (
         exportedName: module.exportedName,
       };
 
-      // Extract all named exports directly from the code
-      const namedExports = new Set<string>();
+      // Use the namedExports from the initial parsing (includes brace exports)
+      const namedExports = info.namedExports || new Set<string>();
 
-      // Check for export statements like "export const useCounter"
-      const exportConstRegex =
-        /export\s+(const|let|var|function|class)\s+([A-Za-z0-9_$]+)/g;
-
+      // Also check for any additional exports that might have been missed
       let hookName = null;
 
-      // Look for direct named exports in the original code
+      // Look for direct named exports in the original code (as backup)
       const originalCode = files.find((f) => f.name === name)?.content || "";
+      const exportConstRegex = /export\s+(const|let|var|function|class)\s+([A-Za-z0-9_$]+)/g;
       let exportMatch;
       while ((exportMatch = exportConstRegex.exec(originalCode)) !== null) {
         namedExports.add(exportMatch[2]);
         if (name.includes("use")) {
           hookName = exportMatch[2];
-          // console.log("Found named export:", exportMatch[2]);
         }
       }
 
@@ -203,7 +269,7 @@ export const transformMultipleFiles = (
       `;
       }
 
-      // Explicitly handle named exports we found
+      // Explicitly handle named exports we found (including brace exports)
       for (const exportName of Array.from(namedExports)) {
         exportsSetup += `
         // Handle named export: ${exportName}
@@ -293,7 +359,7 @@ export const transformMultipleFiles = (
         console.warn("React object is missing hooks. This may cause issues with hook usage in components.");
       }
       
-      ${dependencyVars}
+      ${allDependencyVars}
       
       ${moduleRegistryCode}
       
@@ -445,7 +511,7 @@ const createImportTransformerPlugin = (
         if (specifiers.length === 0) return;
 
         // Special case for React imports
-        if (source === "react") {
+        if (source === "react" || source.startsWith("https://esm.sh/react@")) {
           const newNodes: t.Statement[] = [];
 
           // Process each React import specifier
@@ -488,13 +554,21 @@ const createImportTransformerPlugin = (
           return;
         }
 
+        // Handle CDN imports (esm.sh URLs)
+        if (source.startsWith("https://esm.sh/")) {
+          // For CDN imports, we'll need to handle them dynamically
+          // For now, we'll skip transformation and let the browser handle them
+          return;
+        }
+
         const normalizedSource = normalizeFilename(source);
         const isLocalModule = normalizedModulePaths.has(normalizedSource);
 
         if (
           !isLocalModule &&
           !allowedDependencies.includes(source) &&
-          source !== "react"
+          source !== "react" &&
+          !source.startsWith("https://")
         ) {
           throw new Error(`Module not found: ${source}`);
         }
@@ -560,7 +634,7 @@ const createImportTransformerPlugin = (
               }
             }
           });
-        } else {
+        } else if (allowedDependencies.includes(source)) {
           const sourceVarName = dependencyVarMap.get(source) || source;
 
           specifiers.forEach((specifier) => {
@@ -598,7 +672,11 @@ const createImportTransformerPlugin = (
           });
         }
 
-        path.replaceWithMultiple(newNodes);
+        if (newNodes.length > 0) {
+          path.replaceWithMultiple(newNodes);
+        } else {
+          path.remove();
+        }
       },
 
       // Handle TypeScript import types (remove them)

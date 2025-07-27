@@ -1,6 +1,6 @@
 {
   "name": "@axil/react-exe",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "A powerful React component executor that renders code with external dependencies and custom styling",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
