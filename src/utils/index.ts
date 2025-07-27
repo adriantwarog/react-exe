@@ -644,11 +644,11 @@ export const transformMultipleFiles = (
         const exports = module.exports;
         
         try {
-          (function(module, exports) {
+          (function(module, exports, React) {
             ${module.code}
             
             ${exportsSetup}
-          })(module, exports);
+          })(module, exports, React);
         } catch (error) {
           console.error("Error in module ${normalizedName}:", error);
           throw error;
