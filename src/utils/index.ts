@@ -83,12 +83,153 @@ class ModuleLoader {
 
   private static async loadModuleInternal(url: string, externalCache?: Map<string, any>): Promise<any> {
     try {
-      // Use dynamic import to load the module
+      // First try dynamic import
+      console.log(`🔄 Attempting dynamic import for: ${url}`);
       const module = await import(/* webpackIgnore: true */ url);
+      console.log(`✅ Dynamic import successful for: ${url}`);
       return module;
+    } catch (dynamicImportError) {
+      console.warn(`❌ Dynamic import failed for ${url}:`, dynamicImportError);
+      
+      // Fallback: Try loading via script tag (for iframe environments)
+      try {
+        console.log(`🔄 Attempting script tag fallback for: ${url}`);
+        const module = await this.loadViaScriptTag(url);
+        console.log(`✅ Script tag fallback successful for: ${url}`);
+        return module;
+      } catch (scriptError) {
+        console.warn(`❌ Script tag fallback failed for ${url}:`, scriptError);
+        
+        // Last resort: Try fetch + eval (for very restrictive environments)
+        try {
+          console.log(`🔄 Attempting fetch + eval fallback for: ${url}`);
+          const module = await this.loadViaFetchEval(url);
+          console.log(`✅ Fetch + eval fallback successful for: ${url}`);
+          return module;
+        } catch (fetchError) {
+          console.error(`❌ All loading methods failed for ${url}:`, {
+            dynamicImportError: dynamicImportError.message,
+            scriptError: scriptError.message,
+            fetchError: fetchError.message
+          });
+          throw new Error(`Failed to load module from ${url}. All methods failed. Last error: ${fetchError.message}`);
+        }
+      }
+    }
+  }
+
+  private static async loadViaScriptTag(url: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      // Create a unique global variable name
+      const globalVarName = `__esm_module_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Create script element
+      const script = document.createElement('script');
+      script.type = 'module';
+      
+      // Create a wrapper that assigns the module to a global variable
+      const moduleCode = `
+        import * as module from '${url}';
+        window.${globalVarName} = module;
+        window.dispatchEvent(new CustomEvent('${globalVarName}_loaded'));
+      `;
+      
+      script.textContent = moduleCode;
+      
+      // Set up event listeners
+      const cleanup = () => {
+        document.head.removeChild(script);
+        delete (window as any)[globalVarName];
+      };
+      
+      // Listen for successful load
+      window.addEventListener(`${globalVarName}_loaded`, () => {
+        const module = (window as any)[globalVarName];
+        cleanup();
+        resolve(module);
+      }, { once: true });
+      
+      // Handle errors
+      script.onerror = () => {
+        cleanup();
+        reject(new Error(`Failed to load module via script tag: ${url}`));
+      };
+      
+      // Set timeout
+      setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timeout loading module via script tag: ${url}`));
+      }, 10000);
+      
+      // Add to document
+      document.head.appendChild(script);
+    });
+  }
+
+  private static async loadViaFetchEval(url: string): Promise<any> {
+    try {
+      // Fetch the module code
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const moduleCode = await response.text();
+      
+      // Create a module-like environment
+      const moduleExports: any = {};
+      const moduleScope = {
+        exports: moduleExports,
+        module: { exports: moduleExports },
+        require: (id: string) => {
+          throw new Error(`require('${id}') not supported in fetch+eval fallback`);
+        },
+        import: (id: string) => {
+          throw new Error(`import('${id}') not supported in fetch+eval fallback`);
+        },
+        console,
+        setTimeout,
+        clearTimeout,
+        setInterval,
+        clearInterval,
+      };
+      
+      // Transform ESM syntax to CommonJS-like for eval
+      let transformedCode = moduleCode;
+      
+      // Simple ESM to CommonJS transformation
+      transformedCode = transformedCode.replace(
+        /export\s+default\s+(.*?)(?:;|$)/gm,
+        'module.exports.default = $1;'
+      );
+      
+      transformedCode = transformedCode.replace(
+        /export\s+(?:const|let|var|function|class)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/gm,
+        (match, name) => {
+          return match.replace('export ', '') + `\nmodule.exports.${name} = ${name};`;
+        }
+      );
+      
+      transformedCode = transformedCode.replace(
+        /export\s*\{([^}]+)\}/gm,
+        (match, exports) => {
+          const exportList = exports.split(',').map((e: string) => e.trim());
+          return exportList.map((exp: string) => `module.exports.${exp} = ${exp};`).join('\n');
+        }
+      );
+      
+      // Remove import statements (they won't work in this context)
+      transformedCode = transformedCode.replace(/import\s+.*?from\s+['"][^'"]*['"];?\s*/gm, '');
+      
+      // Create function and execute
+      const func = new Function(...Object.keys(moduleScope), transformedCode);
+      func(...Object.values(moduleScope));
+      
+      // Return the exports
+      return moduleExports.default || moduleExports;
+      
     } catch (error) {
-      console.error(`Failed to load module from ${url}:`, error);
-      throw new Error(`Failed to load module from ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Fetch+eval failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -106,8 +247,12 @@ class ModuleLoader {
 export function detectImports(codeFiles: CodeFile[]): Set<string> {
   const detectedImports = new Set<string>();
   
+  console.log('🔍 Detecting imports in files:', codeFiles.map(f => ({ name: f.name, contentLength: f.content.length })));
+  
   codeFiles.forEach(file => {
     const content = file.content;
+    console.log(`📄 Analyzing file: ${file.name}`);
+    console.log(`📝 Content preview:`, content.substring(0, 200) + '...');
     
     // Match various import patterns
     const importPatterns = [
@@ -119,19 +264,24 @@ export function detectImports(codeFiles: CodeFile[]): Set<string> {
       /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
     ];
     
-    importPatterns.forEach(pattern => {
+    importPatterns.forEach((pattern, index) => {
       let match;
       while ((match = pattern.exec(content)) !== null) {
         const moduleName = match[1];
+        console.log(`🎯 Found import with pattern ${index}: "${moduleName}"`);
         
         // Skip relative imports (starting with . or /)
         if (!moduleName.startsWith('.') && !moduleName.startsWith('/')) {
           detectedImports.add(moduleName);
+          console.log(`✅ Added to detected imports: "${moduleName}"`);
+        } else {
+          console.log(`⏭️ Skipped relative import: "${moduleName}"`);
         }
       }
     });
   });
   
+  console.log('🎯 Final detected imports:', Array.from(detectedImports));
   return detectedImports;
 }
 
@@ -148,29 +298,41 @@ export async function resolveAutoDependencies(
   // Merge custom registry with popular dependencies (custom takes precedence)
   const dependencyRegistry = { ...POPULAR_DEPENDENCIES, ...customDependencyRegistry };
   
-  for (const importName of detectedImports) {
+  console.log('🔍 Resolving auto-dependencies for imports:', Array.from(detectedImports));
+  console.log('📚 Available dependency registry:', Object.keys(dependencyRegistry));
+  
+  // Convert Set to Array for iteration compatibility
+  const importsArray = Array.from(detectedImports);
+  
+  for (const importName of importsArray) {
     const url = dependencyRegistry[importName];
+    
+    console.log(`🔎 Checking import "${importName}": ${url ? `found URL ${url}` : 'not in registry'}`);
     
     if (url) {
       const loadPromise = ModuleLoader.loadModule(url, allowedDomains, externalCache)
         .then(module => {
           autoDependencies[importName] = module;
-          console.log(`Auto-loaded dependency: ${importName} from ${url}`);
+          console.log(`✅ Auto-loaded dependency: ${importName} from ${url}`);
         })
         .catch(error => {
-          console.warn(`Failed to auto-load dependency '${importName}' from ${url}:`, error.message);
+          console.warn(`❌ Failed to auto-load dependency '${importName}' from ${url}:`, error.message);
           // Don't throw here - just skip this dependency and let the import transformer handle the error
         });
       
       loadPromises.push(loadPromise);
+    } else {
+      console.log(`⏭️ Skipping "${importName}" - not in auto-dependency registry`);
     }
   }
   
   // Wait for all auto-dependencies to load
   if (loadPromises.length > 0) {
+    console.log(`⏳ Waiting for ${loadPromises.length} dependencies to load...`);
     await Promise.all(loadPromises);
   }
   
+  console.log('🎉 Auto-dependencies resolved:', Object.keys(autoDependencies));
   return autoDependencies;
 }
 
@@ -222,7 +384,10 @@ export async function processDependencies(
   
   // Auto-detect and load dependencies if enabled
   if (enableAutoDependencies) {
+    console.log('🚀 Auto-dependency detection enabled');
     const detectedImports = detectImports(codeFiles);
+    console.log('📦 Detected imports:', Array.from(detectedImports));
+    
     const autoDependencies = await resolveAutoDependencies(
       detectedImports,
       customDependencyRegistry,
@@ -230,8 +395,13 @@ export async function processDependencies(
       externalCache
     );
     
+    console.log('🔗 Auto-loaded dependencies:', Object.keys(autoDependencies));
+    
     // Merge auto-dependencies with manual ones (manual takes precedence)
     processedDependencies = { ...autoDependencies, ...processedDependencies };
+    console.log('✅ Final processed dependencies:', Object.keys(processedDependencies));
+  } else {
+    console.log('❌ Auto-dependency detection disabled');
   }
   
   return processedDependencies;
