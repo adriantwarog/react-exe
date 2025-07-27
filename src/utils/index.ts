@@ -99,6 +99,19 @@ export const transformMultipleFiles = (
       );
     }
 
+    // Detect potential React components even if not exported
+    const componentDetectionRegex = /(?:const|let|var|function)\s+([A-Z][A-Za-z0-9_]*)\s*(?:=|:|\()/g;
+    const potentialComponents = new Set<string>();
+    let match;
+    
+    while ((match = componentDetectionRegex.exec(processedInput)) !== null) {
+      const componentName = match[1];
+      // Only track if it wasn't already tracked as an export
+      if (!fileExportInfo?.namedExports.has(componentName)) {
+        potentialComponents.add(componentName);
+      }
+    }
+
     const transpiledCode = transform(processedInput, {
       presets: [
         ["typescript", { isTSX: true, allExtensions: true }],
@@ -119,6 +132,7 @@ export const transformMultipleFiles = (
       code: transpiledCode,
       exportedName,
       exportInfo: fileExportInfo,
+      potentialComponents: Array.from(potentialComponents),
     } as any);
   });
 
@@ -206,6 +220,22 @@ export const transformMultipleFiles = (
           exports.${hookName} = ${hookName};
         }
       `;
+      }
+
+      // Auto-export potential components if no exports exist
+      const hasAnyExports = info.hasDefaultExport || namedExports.size > 0;
+      if (!hasAnyExports && module.potentialComponents && module.potentialComponents.length > 0) {
+        exportsSetup += `
+        // Auto-exporting detected components since no exports were defined
+      `;
+        for (const componentName of module.potentialComponents) {
+          exportsSetup += `
+        if (typeof ${componentName} !== 'undefined') {
+          exports.${componentName} = ${componentName};
+          exports.__autoExported = true; // Mark that these were auto-exported
+        }
+      `;
+        }
       }
 
       return `
@@ -301,8 +331,8 @@ export const transformMultipleFiles = (
           
           // Check all exported properties
           if (typeof exports === 'object' && exports !== null) {
-            // Sort keys to ensure consistent ordering
-            const keys = Object.keys(exports).sort();
+            // Use the order they were exported (no sorting)
+            const keys = Object.keys(exports);
             
             for (const key of keys) {
               const value = exports[key];
@@ -329,15 +359,26 @@ export const transformMultipleFiles = (
         // Validate that we found a valid component
         if (!Component || typeof Component !== 'function') {
           // Provide helpful error message
-          const exportedKeys = Object.keys(entryModule).filter(k => k !== '__esModule');
-          throw new Error(
-            \`No React component found in module. Expected either:
+          const exportedKeys = Object.keys(entryModule).filter(k => k !== '__esModule' && k !== '__autoExported');
+          const wasAutoExported = entryModule.__autoExported;
+          
+          let errorMessage = \`No React component found in module. Expected either:
             1. A default export: export default MyComponent
             2. A named export with uppercase name: export const MyComponent = () => ...
+            3. A component declaration with uppercase name: const MyComponent = () => ...\`;
+            
+          if (wasAutoExported) {
+            errorMessage += \`
+            
+            Note: Components were auto-detected but none were valid React components.\`;
+          }
+          
+          errorMessage += \`
             
             Found exports: \${exportedKeys.length > 0 ? exportedKeys.join(', ') : 'none'}
-            Module type: \${typeof entryModule}\`
-          );
+            Module type: \${typeof entryModule}\`;
+            
+          throw new Error(errorMessage);
         }
         
         return Component;
