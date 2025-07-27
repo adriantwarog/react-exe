@@ -7,6 +7,236 @@ import type { CodeFile } from "../index";
 
 const moduleCache = new Map<string, string>();
 
+// Registry of popular dependencies that can be auto-loaded
+const POPULAR_DEPENDENCIES: Record<string, string> = {
+  "lucide-react": "https://esm.sh/lucide-react@0.513.0",
+  "framer-motion": "https://esm.sh/framer-motion@11.0.8",
+  "react-router-dom": "https://esm.sh/react-router-dom@6.22.0",
+  "date-fns": "https://esm.sh/date-fns@3.6.0",
+  "lodash": "https://esm.sh/lodash@4.17.21",
+  "axios": "https://esm.sh/axios@1.6.7",
+  "clsx": "https://esm.sh/clsx@2.1.0",
+  "react-hook-form": "https://esm.sh/react-hook-form@7.50.1",
+  "zod": "https://esm.sh/zod@3.22.4",
+  "recharts": "https://esm.sh/recharts@2.12.2",
+  "react-query": "https://esm.sh/@tanstack/react-query@5.25.0",
+  "@tanstack/react-query": "https://esm.sh/@tanstack/react-query@5.25.0",
+  "react-icons": "https://esm.sh/react-icons@5.0.1",
+  "react-hot-toast": "https://esm.sh/react-hot-toast@2.4.1",
+  "zustand": "https://esm.sh/zustand@4.5.2",
+};
+
+// Module loader for URL-based dependencies
+class ModuleLoader {
+  private static cache = new Map<string, any>();
+  private static loadingPromises = new Map<string, Promise<any>>();
+
+  static async loadModule(
+    url: string, 
+    allowedDomains: string[] = ['esm.sh', 'cdn.skypack.dev', 'unpkg.com', 'jspm.dev'],
+    externalCache?: Map<string, any>
+  ): Promise<any> {
+    // Check external cache first
+    if (externalCache?.has(url)) {
+      return externalCache.get(url);
+    }
+
+    // Check internal cache
+    if (this.cache.has(url)) {
+      return this.cache.get(url);
+    }
+
+    // Check if already loading
+    if (this.loadingPromises.has(url)) {
+      return this.loadingPromises.get(url);
+    }
+
+    // Validate URL domain
+    try {
+      const urlObj = new URL(url);
+      const isAllowed = allowedDomains.some(domain => 
+        urlObj.hostname === domain || urlObj.hostname.endsWith('.' + domain)
+      );
+      
+      if (!isAllowed) {
+        throw new Error(`Domain ${urlObj.hostname} is not in the allowed domains list: ${allowedDomains.join(', ')}`);
+      }
+    } catch (error) {
+      throw new Error(`Invalid URL or domain not allowed: ${url}`);
+    }
+
+    // Start loading
+    const loadingPromise = this.loadModuleInternal(url, externalCache);
+    this.loadingPromises.set(url, loadingPromise);
+
+    try {
+      const module = await loadingPromise;
+      this.cache.set(url, module);
+      if (externalCache) {
+        externalCache.set(url, module);
+      }
+      return module;
+    } finally {
+      this.loadingPromises.delete(url);
+    }
+  }
+
+  private static async loadModuleInternal(url: string, externalCache?: Map<string, any>): Promise<any> {
+    try {
+      // Use dynamic import to load the module
+      const module = await import(/* webpackIgnore: true */ url);
+      return module;
+    } catch (error) {
+      console.error(`Failed to load module from ${url}:`, error);
+      throw new Error(`Failed to load module from ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  static clearCache(): void {
+    this.cache.clear();
+    this.loadingPromises.clear();
+  }
+
+  static getCacheSize(): number {
+    return this.cache.size;
+  }
+}
+
+// Function to detect imports in code
+export function detectImports(codeFiles: CodeFile[]): Set<string> {
+  const detectedImports = new Set<string>();
+  
+  codeFiles.forEach(file => {
+    const content = file.content;
+    
+    // Match various import patterns
+    const importPatterns = [
+      // import ... from 'module'
+      /import\s+(?:[^'"]*\s+from\s+)?['"]([^'"]+)['"]/g,
+      // import('module')
+      /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+      // require('module')
+      /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+    ];
+    
+    importPatterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.exec(content)) !== null) {
+        const moduleName = match[1];
+        
+        // Skip relative imports (starting with . or /)
+        if (!moduleName.startsWith('.') && !moduleName.startsWith('/')) {
+          detectedImports.add(moduleName);
+        }
+      }
+    });
+  });
+  
+  return detectedImports;
+}
+
+// Function to resolve auto-loadable dependencies
+export async function resolveAutoDependencies(
+  detectedImports: Set<string>,
+  customDependencyRegistry: Record<string, string> = {},
+  allowedDomains?: string[],
+  externalCache?: Map<string, any>
+): Promise<Record<string, any>> {
+  const autoDependencies: Record<string, any> = {};
+  const loadPromises: Promise<void>[] = [];
+  
+  // Merge custom registry with popular dependencies (custom takes precedence)
+  const dependencyRegistry = { ...POPULAR_DEPENDENCIES, ...customDependencyRegistry };
+  
+  for (const importName of detectedImports) {
+    const url = dependencyRegistry[importName];
+    
+    if (url) {
+      const loadPromise = ModuleLoader.loadModule(url, allowedDomains, externalCache)
+        .then(module => {
+          autoDependencies[importName] = module;
+          console.log(`Auto-loaded dependency: ${importName} from ${url}`);
+        })
+        .catch(error => {
+          console.warn(`Failed to auto-load dependency '${importName}' from ${url}:`, error.message);
+          // Don't throw here - just skip this dependency and let the import transformer handle the error
+        });
+      
+      loadPromises.push(loadPromise);
+    }
+  }
+  
+  // Wait for all auto-dependencies to load
+  if (loadPromises.length > 0) {
+    await Promise.all(loadPromises);
+  }
+  
+  return autoDependencies;
+}
+
+// Enhanced dependency processing function
+export async function processDependencies(
+  codeFiles: CodeFile[],
+  manualDependencies: Record<string, any | string> = {},
+  config: {
+    enableAutoDependencies?: boolean;
+    customDependencyRegistry?: Record<string, string>;
+    allowedDomains?: string[];
+    externalCache?: Map<string, any>;
+  } = {}
+): Promise<Record<string, any>> {
+  const {
+    enableAutoDependencies = true,
+    customDependencyRegistry = {},
+    allowedDomains,
+    externalCache
+  } = config;
+  
+  let processedDependencies: Record<string, any> = {};
+  
+  // Process manual dependencies first (URLs and objects)
+  const manualLoadPromises: Promise<void>[] = [];
+  
+  for (const [key, value] of Object.entries(manualDependencies)) {
+    if (typeof value === 'string' && value.startsWith('http')) {
+      // This is a URL dependency
+      const loadPromise = ModuleLoader.loadModule(value, allowedDomains, externalCache)
+        .then(module => {
+          processedDependencies[key] = module;
+        })
+        .catch(error => {
+          throw new Error(`Failed to load manual dependency '${key}' from ${value}: ${error.message}`);
+        });
+      
+      manualLoadPromises.push(loadPromise);
+    } else {
+      // This is a regular object dependency
+      processedDependencies[key] = value;
+    }
+  }
+  
+  // Wait for manual dependencies to load
+  if (manualLoadPromises.length > 0) {
+    await Promise.all(manualLoadPromises);
+  }
+  
+  // Auto-detect and load dependencies if enabled
+  if (enableAutoDependencies) {
+    const detectedImports = detectImports(codeFiles);
+    const autoDependencies = await resolveAutoDependencies(
+      detectedImports,
+      customDependencyRegistry,
+      allowedDomains,
+      externalCache
+    );
+    
+    // Merge auto-dependencies with manual ones (manual takes precedence)
+    processedDependencies = { ...autoDependencies, ...processedDependencies };
+  }
+  
+  return processedDependencies;
+}
+
 export const transformMultipleFiles = (
   files: CodeFile[],
   dependencies: Record<string, any>
