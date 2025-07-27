@@ -31,7 +31,6 @@ export interface CodeExecutorConfig {
   errorStyle?: React.CSSProperties;
   securityPatterns?: RegExp[];
   onError?: (error: Error) => void;
-  enableTailwind?: boolean;
 }
 
 export interface CodeExecutorProps {
@@ -159,13 +158,10 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
 }) => {
   const {
     dependencies = {},
-    containerClassName,
-    containerStyle,
     errorClassName,
     errorStyle,
     securityPatterns = defaultSecurityPatterns,
     onError,
-    enableTailwind = false,
   } = config;
 
   const [executionResult, setExecutionResult] = useState<ExecutionResult>(
@@ -187,18 +183,7 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
     return codeChanged || dependenciesChanged;
   }, [code, dependencies]);
 
-  useEffect(() => {
-    if (enableTailwind) {
-      const link = document.createElement("link");
-      link.href = "https://cdn.tailwindcss.com";
-      link.rel = "stylesheet";
-      document.head.appendChild(link);
-
-      return () => {
-        document.head.removeChild(link);
-      };
-    }
-  }, [enableTailwind]);
+ 
 
   // Execute code on changes
   useEffect(() => {
@@ -262,7 +247,7 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
         className={cn("code-viewer-error", errorClassName)}
         style={{
           padding: "16px",
-          backgroundColor: "#fef2f2",
+        //   backgroundColor: "#fef2f2",
           border: "1px solid #fee2e2",
           borderRadius: "4px",
           color: "#dc2626",
@@ -295,25 +280,7 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
   }
 
   return (
-    <div
-      className={cn("code-viewer", containerClassName)}
-      style={containerStyle}
-    >
-      <span
-        style={{
-          display: "none",
-          position: "absolute",
-        }}
-      >
-        Powered by{" "}
-        <a
-          href="https://www.npmjs.com/package/react-exe"
-          target="_blank"
-          rel="noreferrer"
-        >
-          React-EXE
-        </a>
-      </span>
+    <>
       <ErrorBoundary
         onError={handleExecutionError}
         fallback={
@@ -338,7 +305,7 @@ export const CodeExecutor: React.FC<CodeExecutorProps> = ({
       >
         {Component ? <Component /> : null}
       </ErrorBoundary>
-    </div>
+    </>
   );
 };
 

@@ -273,12 +273,71 @@ export const transformMultipleFiles = (
 
       try {
         const entryModule = getModule("${entryModuleName}");
-        // More robust handling of the component export
-        const Component = entryModule.default || entryModule;
         
-        // Validate that we're returning a valid component
-        if (typeof Component !== 'function') {
-          throw new Error(\`Expected a React component but got \${typeof Component} (\${JSON.stringify(Component)}). Check that your component is properly exported.\`);
+        // Helper function to check if something looks like a React component
+        function isReactComponent(value) {
+          if (typeof value !== 'function') return false;
+          
+          // Check if it's a function with uppercase first letter
+          const name = value.name || '';
+          if (name && name[0] === name[0].toUpperCase()) {
+            return true;
+          }
+          
+          // Check if it returns JSX (has createElement calls or JSX in toString)
+          const fnString = value.toString();
+          return fnString.includes('React.createElement') || 
+                 fnString.includes('jsx') || 
+                 fnString.includes('return React.') ||
+                 fnString.includes('return <');
+        }
+        
+        // Helper function to find the first component in exports
+        function findFirstComponent(exports) {
+          // If exports is a function itself and looks like a component
+          if (isReactComponent(exports)) {
+            return exports;
+          }
+          
+          // Check all exported properties
+          if (typeof exports === 'object' && exports !== null) {
+            // Sort keys to ensure consistent ordering
+            const keys = Object.keys(exports).sort();
+            
+            for (const key of keys) {
+              const value = exports[key];
+              if (isReactComponent(value)) {
+                console.log(\`Found component: \${key}\`);
+                return value;
+              }
+            }
+          }
+          
+          return null;
+        }
+        
+        // Try to get the component in order of preference:
+        // 1. Default export
+        // 2. First component found in exports
+        let Component = entryModule.default;
+        
+        if (!Component || typeof Component !== 'function') {
+          console.log('No default export found, searching for components...');
+          Component = findFirstComponent(entryModule);
+        }
+        
+        // Validate that we found a valid component
+        if (!Component || typeof Component !== 'function') {
+          // Provide helpful error message
+          const exportedKeys = Object.keys(entryModule).filter(k => k !== '__esModule');
+          throw new Error(
+            \`No React component found in module. Expected either:
+            1. A default export: export default MyComponent
+            2. A named export with uppercase name: export const MyComponent = () => ...
+            
+            Found exports: \${exportedKeys.length > 0 ? exportedKeys.join(', ') : 'none'}
+            Module type: \${typeof entryModule}\`
+          );
         }
         
         return Component;
